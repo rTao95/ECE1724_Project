@@ -126,3 +126,4 @@ The objective of this project is to develop a scalable, distributed file storage
 *Responsibility*: All team members collaborate on documentation, finalization, and preparation for deployment.
 
 Yige Tao 1000741094
+Zhouhan Jin 1006146699
