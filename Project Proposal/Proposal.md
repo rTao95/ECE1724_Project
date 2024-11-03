@@ -127,3 +127,4 @@ The objective of this project is to develop a scalable, distributed file storage
 
 Yige Tao 1000741094
 Zhouhan Jin 1006146699
+zhonghao Liu 1004796848
