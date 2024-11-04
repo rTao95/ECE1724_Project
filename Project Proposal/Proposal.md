@@ -3,8 +3,10 @@
 ## Team Members
 
 Yige Tao 1000741094
-Zhouhan Jin 1006146699
+
 Zhonghao Liu 1004796848
+
+Zhouhan Jin 1006146699
 
 ## Motivation
 
