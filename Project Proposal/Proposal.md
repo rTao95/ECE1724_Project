@@ -1,3 +1,11 @@
+# ECE1724 Project Proposal: Distributed File Storage System
+
+## Team Members
+
+Yige Tao 1000741094
+Zhouhan Jin 1006146699
+Zhonghao Liu 1004796848
+
 ## Motivation
 
 In today’s data-driven world, managing and securing large volumes of data efficiently is a significant challenge. Distributed file storage systems offer a way to address these challenges by storing data across multiple nodes, ensuring reliability and accessibility even if individual nodes go offline. However, many existing solutions lack the flexibility and performance needed for seamless integration into varied environments, especially when built from scratch in a language like Rust.
@@ -124,7 +132,3 @@ The objective of this project is to develop a scalable, distributed file storage
   - Explore potential deployment on AWS for scalability.
 
 *Responsibility*: All team members collaborate on documentation, finalization, and preparation for deployment.
-
-Yige Tao 1000741094
-Zhouhan Jin 1006146699
-zhonghao Liu 1004796848
