@@ -1,11 +1,15 @@
 # ECE1724_Project
 
-# Feature
+## Link
+* task tracker: https://docs.google.com/spreadsheets/d/1j89gKSbjLw0jRq4DW_lp3bVWRzagvjYnBrN-0lmQptI/edit?gid=0#gid=0
+* engineer plan: https://docs.google.com/document/d/1hgIbQsPX-tQ5CF34h3HKw3hM1S8jAv7i1C7_QIL79-U/edit?tab=t.0
+
+## Feature
 upload(file) -> None
 download(filename) -> file
 list() -> array<filename:string>
 
-# Requirements
+## Requirements
 * Node discovery using a peer-to-peer networking protocol
 **  
 * File chunking and distribution
@@ -14,7 +18,7 @@ list() -> array<filename:string>
 * A front-end user interface that can be as simple as a command-line utility
 
 
-# Workflow
+## Workflow
 s0 .. s9
 upload:
 USEREND
