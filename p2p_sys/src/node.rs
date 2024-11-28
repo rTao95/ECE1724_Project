@@ -1,10 +1,12 @@
 use futures::stream::StreamExt;
+use futures::{stream, Stream};
 use libp2p::{gossipsub, mdns, noise, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux};
 use std::collections::hash_map::DefaultHasher;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use tokio::{io, io::AsyncBufReadExt, select};
+use std::pin::Pin;
 
 #[derive(NetworkBehaviour)]
 pub struct MyBehaviour {
@@ -12,6 +14,34 @@ pub struct MyBehaviour {
     pub mdns: mdns::tokio::Behaviour,
 }
 
+/// Asynchronous function to read lines from standard input
+fn get_input() -> Pin<Box<dyn Stream<Item = String> + Send>> {
+    let stdin = io::BufReader::new(io::stdin());
+    let stream = stream::unfold(stdin.lines(), |mut lines| async {
+        match lines.next_line().await {
+            Ok(Some(line)) => Some((line, lines)),
+            _ => None, // Stops the stream on EOF or error
+        }
+    });
+    Box::pin(stream)
+}
+
+fn process_received_message(peer_id: &libp2p::PeerId, message_id: &gossipsub::MessageId, data: &[u8]) {
+    // Convert the message data to a string
+    let message_content = String::from_utf8_lossy(data);
+    
+    // Print the message
+    println!(
+        "Received message: '{}' with ID: {} from peer: {}",
+        message_content, message_id, peer_id
+    );
+
+    // Future behavior: Add custom logic based on message content
+    // Example:
+    // if message_content == "shutdown" {
+    //     println!("Shutting down based on peer request!");
+    // }
+}
 pub async fn run_peer_to_peer_system(topic_name: String) -> Result<(), Box<dyn Error>> {
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -31,7 +61,7 @@ pub async fn run_peer_to_peer_system(topic_name: String) -> Result<(), Box<dyn E
             let gossipsub_config = gossipsub::ConfigBuilder::default()
                 .heartbeat_interval(Duration::from_secs(10))
                 .validation_mode(gossipsub::ValidationMode::Strict)
-                .message_id_fn(message_id_fn)
+                //.message_id_fn(message_id_fn)
                 .build()
                 .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
 
@@ -40,8 +70,7 @@ pub async fn run_peer_to_peer_system(topic_name: String) -> Result<(), Box<dyn E
                 gossipsub_config,
             )?;
 
-            let mdns =
-                mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+            let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
             Ok(MyBehaviour { gossipsub, mdns })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
@@ -50,16 +79,16 @@ pub async fn run_peer_to_peer_system(topic_name: String) -> Result<(), Box<dyn E
     let topic = gossipsub::IdentTopic::new(&topic_name);
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
-    let mut stdin = io::BufReader::new(io::stdin()).lines();
-
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     println!("Listening for peers and publishing to topic: {topic_name}");
 
+    let mut input_stream = get_input();
+
     loop {
         select! {
-            Ok(Some(line)) = stdin.next_line() => {
+            Some(line) = input_stream.next() => {
                 if let Err(e) = swarm
                     .behaviour_mut().gossipsub
                     .publish(topic.clone(), line.as_bytes()) {
@@ -83,10 +112,9 @@ pub async fn run_peer_to_peer_system(topic_name: String) -> Result<(), Box<dyn E
                     propagation_source: peer_id,
                     message_id: id,
                     message,
-                })) => println!(
-                        "Got message: '{}' with id: {id} from peer: {peer_id}",
-                        String::from_utf8_lossy(&message.data),
-                    ),
+                })) =>{
+                    process_received_message(&peer_id, &id, &message.data);
+                },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     println!("Local node is listening on {address}");
                 }
