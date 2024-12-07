@@ -4,12 +4,13 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, PeerId,
 };
-use std::collections::hash_map::DefaultHasher;
+use std::str::FromStr;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use tokio::{io, io::AsyncBufReadExt, select};
-
+use rand::Rng;
+use std::collections::HashMap;
 mod file_operations; // Include the new module
 
 #[derive(NetworkBehaviour)]
@@ -18,10 +19,13 @@ pub struct MyBehaviour {
     pub mdns: mdns::tokio::Behaviour,
 }
 
+
 pub async fn run_peer_to_peer_system(
     topic_name: String,
     password: String,
 ) -> Result<(), Box<dyn Error>> {
+    let mut peer_scores: HashMap<PeerId, f64> = HashMap::new(); // Score matrix
+
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(tcp::Config::default(), libp2p::noise::Config::new, || {
@@ -32,7 +36,7 @@ pub async fn run_peer_to_peer_system(
             let local_peer_id = key.public().to_peer_id();
 
             let message_id_fn = |message: &gossipsub::Message| {
-                let mut s = DefaultHasher::new();
+                let mut s = std::collections::hash_map::DefaultHasher::new();
                 message.data.hash(&mut s);
                 gossipsub::MessageId::from(s.finish().to_string())
             };
@@ -77,7 +81,7 @@ pub async fn run_peer_to_peer_system(
             line = stdin.next_line() => {
                 match line {
                     Ok(Some(input)) => {
-                        handle_user_input(&input, &mut swarm, &topic, &local_peer_id, &password).await?;
+                        handle_user_input(&input, &mut swarm, &topic, &local_peer_id, &password, &mut peer_scores).await?;
                     },
                     Ok(None) => break Ok(()),
                     Err(e) => {
@@ -88,33 +92,77 @@ pub async fn run_peer_to_peer_system(
 
             // Handle swarm events
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &mut swarm, &password).await?;
+                handle_swarm_event(event, &mut swarm, &password, &mut peer_scores).await?;
             }
         }
     }
 }
+fn is_valid_interaction(
+    peer_scores: &HashMap<PeerId, f64>,
+    peer_id: &PeerId,
+) -> bool {
+    // Find the top 3 peers by score
+    let mut top_peers: Vec<(&PeerId, &f64)> = peer_scores.iter().collect();
+    top_peers.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    let top_3: Vec<&PeerId> = top_peers.iter().take(3).map(|(peer_id, _)| *peer_id).collect();
 
-// Helper function to handle user input
+    if top_3.contains(&peer_id) {
+        // Always interact with top 3 peers
+        return true;
+    } else {
+        // For other peers, decide based on a random probability
+        if let Some(score) = peer_scores.get(peer_id) {
+            let normalized_score = (*score).max(0.0).min(1.0); // Ensure score is between 0 and 1
+            let probability = normalized_score; // Higher score = higher probability
+            let mut rng = rand::thread_rng();
+            return rng.gen_bool(probability);
+        }
+    }
+
+    false // Default to invalid interaction
+}
+// Helper function to update scores
+fn update_peer_score(peer_scores: &mut HashMap<PeerId, f64>, peer_id: &PeerId, delta: f64) {
+    let score = peer_scores.entry(peer_id.clone()).or_insert(0.0);
+    *score += delta;
+    println!("Updated score for {}: {}", peer_id, *score);
+}
+
+// Handle user input with score updates
 async fn handle_user_input(
     input: &str,
     swarm: &mut libp2p::Swarm<MyBehaviour>,
     topic: &gossipsub::IdentTopic,
     local_peer_id: &PeerId,
     password: &str,
+    peer_scores: &mut HashMap<PeerId, f64>,
 ) -> Result<(), Box<dyn Error>> {
-    if input.trim() == "@upload" {
-        // Call the function to select and broadcast a file
+    if input.trim().starts_with("@upload") {
+        // Parse target peer ID from the command
+        let parts: Vec<&str> = input.trim().split_whitespace().collect();
+        if parts.len() < 2 {
+            println!("Usage: @upload <peer_id>");
+            return Ok(());
+        }
+        let target_peer_id_str = parts[1];
+        let target_peer_id = match PeerId::from_str(target_peer_id_str) {
+            Ok(id) => id,
+            Err(_) => {
+                println!("Invalid peer ID: {}", target_peer_id_str);
+                return Ok(());
+            }
+        };
+
+        // Select and read the file
         if let Some(file_path) = file_operations::select_file() {
             match file_operations::read_file_to_bytes(&file_path) {
                 Ok(file_data) => {
-                    // Get the file name
                     let file_name = file_path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or("unknown")
                         .to_string();
 
-                    // Create a FileMessage with the password
                     let file_message = FileMessage {
                         sender: (*local_peer_id).to_string(),
                         password: password.to_string(),
@@ -122,18 +170,22 @@ async fn handle_user_input(
                         data: file_data,
                     };
 
-                    // Serialize the FileMessage
                     let serialized = serde_json::to_vec(&file_message)?;
 
-                    // Publish the serialized file message
-                    if let Err(e) = swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic.clone(), serialized)
+                    // Send file message to the specific peer
+                    if let Err(e) = send_file_to_peer(
+                        swarm,
+                        &target_peer_id,
+                        topic,
+                        serialized,
+                    )
+                    .await
                     {
-                        println!("Publish error: {:?}", e);
+                        println!("Failed to send file to peer {}: {:?}", target_peer_id, e);
                     } else {
-                        println!("File broadcasted to peers.");
+                        println!("File sent to peer: {}", target_peer_id);
+                        // Increment score for the local peer
+                        update_peer_score(peer_scores, local_peer_id, 1.0);
                     }
                 }
                 Err(e) => println!("Failed to read file: {}", e),
@@ -141,8 +193,13 @@ async fn handle_user_input(
         } else {
             println!("No file selected for upload.");
         }
+    } else if input.trim() == "@check_scores" {
+        println!("Current peer scores:");
+        for (peer_id, score) in peer_scores {
+            println!("Peer ID: {}, Score: {}", peer_id, score);
+        }
     } else {
-        // Regular text message with password prepended
+        // Handle regular messages
         let message_with_password = format!("{}:{}", password, input);
         if let Err(e) = swarm
             .behaviour_mut()
@@ -150,22 +207,69 @@ async fn handle_user_input(
             .publish(topic.clone(), message_with_password.as_bytes())
         {
             println!("Publish error: {:?}", e);
+        } else {
+            println!("Message sent: {}", input);
+            update_peer_score(peer_scores, local_peer_id, 0.5);
         }
     }
     Ok(())
 }
 
-// Helper function to handle swarm events
+async fn send_file_to_peer(
+    swarm: &mut libp2p::Swarm<MyBehaviour>,
+    target_peer_id: &PeerId,
+    topic: &gossipsub::IdentTopic, // Topic passed to this function
+    serialized_message: Vec<u8>,
+) -> Result<(), Box<dyn Error>> {
+    // Ensure the peer is connected
+    if !swarm.is_connected(target_peer_id) {
+        println!("Peer {} is not connected.", target_peer_id);
+        return Err("Target peer is not connected".into());
+    }
+
+    // Add the target peer as an explicit peer
+    swarm.behaviour_mut().gossipsub.add_explicit_peer(target_peer_id);
+    println!("Added peer {} as an explicit peer.", target_peer_id);
+
+    // Wait briefly to allow the protocol to adjust
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Attempt to send the file message to the specified topic
+    let result = swarm
+        .behaviour_mut()
+        .gossipsub
+        .publish(topic.clone(), serialized_message);
+
+    // Clean up explicit peer regardless of success or failure
+    swarm.behaviour_mut().gossipsub.remove_explicit_peer(target_peer_id);
+
+    match result {
+        Ok(_) => {
+            println!("File successfully sent to peer {}.", target_peer_id);
+            Ok(())
+        }
+        Err(e) => {
+            println!("Failed to send file to peer {}: {:?}", target_peer_id, e);
+            Err(e.into())
+        }
+    }
+}
+
+
+// Handle swarm events with score updates
 async fn handle_swarm_event(
     event: SwarmEvent<MyBehaviourEvent>,
     swarm: &mut libp2p::Swarm<MyBehaviour>,
     password: &str,
+    peer_scores: &mut HashMap<PeerId, f64>,
 ) -> Result<(), Box<dyn Error>> {
     match event {
         SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
             for (peer_id, _) in list {
                 println!("mDNS discovered a new peer: {}", peer_id);
                 swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                // Initialize score for the new peer
+                peer_scores.entry(peer_id).or_insert(0.5);
             }
         }
         SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
@@ -182,7 +286,14 @@ async fn handle_swarm_event(
             message_id: id,
             message,
         })) => {
-            handle_received_message(&peer_id, &id, &message, password).await?;
+            if is_valid_interaction(peer_scores, &peer_id) {
+                println!("Valid interaction with peer: {}", peer_id);
+                handle_received_message(&peer_id, &id, &message, password).await?;
+                update_peer_score(peer_scores, &peer_id, 1.0);
+            } else {
+                println!("Invalid interaction with peer: {}", peer_id);
+                update_peer_score(peer_scores, &peer_id, -0.5); // Penalize invalid interactions
+            }
         }
         SwarmEvent::NewListenAddr { address, .. } => {
             println!("Local node is listening on {}", address);
@@ -191,6 +302,7 @@ async fn handle_swarm_event(
     }
     Ok(())
 }
+
 
 // Helper function to handle received messages
 async fn handle_received_message(
