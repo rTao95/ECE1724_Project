@@ -8,10 +8,24 @@ use std::str::FromStr;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
+
 use tokio::{io, io::AsyncBufReadExt, select};
-use rand::Rng;
+use rand::prelude::IteratorRandom;
 use std::collections::HashMap;
+use chrono::{DateTime, Utc}; // For timestamps
 mod file_operations; // Include the new module
+
+type SharedFileTransferLogs = Arc<Mutex<Vec<FileTransferLog>>>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct FileTransferLog {
+    peer_id: String, // Store PeerId as a String
+    file_name: String,
+    timestamp: DateTime<Utc>,
+    password: String,
+}
+
 
 #[derive(NetworkBehaviour)]
 pub struct MyBehaviour {
@@ -20,11 +34,30 @@ pub struct MyBehaviour {
 }
 
 
+fn search_transfer_log(
+    logs: &Vec<FileTransferLog>,
+    peer_id: Option<&str>,
+    file_name: Option<&str>,
+    date: Option<DateTime<Utc>>,
+) -> Vec<FileTransferLog> {
+    logs.iter()
+        .filter(|log| {
+            peer_id.map_or(true, |id| log.peer_id == id)
+                && file_name.map_or(true, |name| log.file_name.contains(name))
+                && date.map_or(true, |d| log.timestamp.date_naive() == d.date_naive())
+        })
+        .cloned()
+        .collect()
+}
+
+
+
 pub async fn run_peer_to_peer_system(
     topic_name: String,
     password: String,
 ) -> Result<(), Box<dyn Error>> {
     let mut peer_scores: HashMap<PeerId, f64> = HashMap::new(); // Score matrix
+    let file_transfer_logs: SharedFileTransferLogs = Arc::new(Mutex::new(Vec::new())); // Shared logs
 
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -81,7 +114,7 @@ pub async fn run_peer_to_peer_system(
             line = stdin.next_line() => {
                 match line {
                     Ok(Some(input)) => {
-                        handle_user_input(&input, &mut swarm, &topic, &local_peer_id, &password, &mut peer_scores).await?;
+                        handle_user_input(&input, &mut swarm, &topic, &local_peer_id, &password, &mut peer_scores, Arc::clone(&file_transfer_logs)).await?;
                     },
                     Ok(None) => break Ok(()),
                     Err(e) => {
@@ -92,41 +125,47 @@ pub async fn run_peer_to_peer_system(
 
             // Handle swarm events
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &mut swarm, &password, &mut peer_scores).await?;
+                handle_swarm_event(event, &mut swarm, &password, &mut peer_scores, &local_peer_id,&topic, Arc::clone(&file_transfer_logs)).await?;
             }
         }
     }
 }
-fn is_valid_interaction(
-    peer_scores: &HashMap<PeerId, f64>,
-    peer_id: &PeerId,
-) -> bool {
-    // Find the top 3 peers by score
-    let mut top_peers: Vec<(&PeerId, &f64)> = peer_scores.iter().collect();
-    top_peers.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    let top_3: Vec<&PeerId> = top_peers.iter().take(3).map(|(peer_id, _)| *peer_id).collect();
 
-    if top_3.contains(&peer_id) {
-        // Always interact with top 3 peers
-        return true;
-    } else {
-        // For other peers, decide based on a random probability
-        if let Some(score) = peer_scores.get(peer_id) {
-            let normalized_score = (*score).max(0.0).min(1.0); // Ensure score is between 0 and 1
-            let probability = normalized_score; // Higher score = higher probability
-            let mut rng = rand::thread_rng();
-            return rng.gen_bool(probability);
-        }
-    }
-
-    false // Default to invalid interaction
-}
 // Helper function to update scores
 fn update_peer_score(peer_scores: &mut HashMap<PeerId, f64>, peer_id: &PeerId, delta: f64) {
     let score = peer_scores.entry(peer_id.clone()).or_insert(0.0);
     *score += delta;
     println!("Updated score for {}: {}", peer_id, *score);
 }
+
+fn select_peers(peer_scores: &HashMap<PeerId, f64>, n: usize) -> Vec<PeerId> {
+    // Sort peers by score in descending order
+    let mut peers_by_score: Vec<_> = peer_scores.iter().collect();
+    peers_by_score.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+
+    // Select up to n-1 top peers
+    let mut selected_peers: Vec<PeerId> = peers_by_score
+        .iter()
+        .take(n.saturating_sub(1)) // Take at most n-1
+        .map(|(peer_id, _)| (*peer_id).clone())
+        .collect();
+
+    // If there are enough remaining peers, add a random one
+    let remaining_peers: Vec<_> = peer_scores
+        .keys()
+        .filter(|peer_id| !selected_peers.contains(peer_id))
+        .cloned()
+        .collect();
+
+    if let Some(random_peer) = remaining_peers.into_iter().choose(&mut rand::thread_rng()) {
+        selected_peers.push(random_peer);
+    }
+
+    // If there are fewer peers than requested, return all available
+    selected_peers.truncate(n);
+    selected_peers
+}
+
 
 // Handle user input with score updates
 async fn handle_user_input(
@@ -136,24 +175,17 @@ async fn handle_user_input(
     local_peer_id: &PeerId,
     password: &str,
     peer_scores: &mut HashMap<PeerId, f64>,
+    file_transfer_logs: SharedFileTransferLogs,
 ) -> Result<(), Box<dyn Error>> {
-    if input.trim().starts_with("@upload") {
-        // Parse target peer ID from the command
-        let parts: Vec<&str> = input.trim().split_whitespace().collect();
-        if parts.len() < 2 {
-            println!("Usage: @upload <peer_id>");
+    if input.trim() == "@upload" {
+        // Select peers using the new function
+        let target_peers = select_peers(peer_scores, 3); // Default n = 3
+
+        if target_peers.is_empty() {
+            println!("No valid peers to send the file.");
             return Ok(());
         }
-        let target_peer_id_str = parts[1];
-        let target_peer_id = match PeerId::from_str(target_peer_id_str) {
-            Ok(id) => id,
-            Err(_) => {
-                println!("Invalid peer ID: {}", target_peer_id_str);
-                return Ok(());
-            }
-        };
 
-        // Select and read the file
         if let Some(file_path) = file_operations::select_file() {
             match file_operations::read_file_to_bytes(&file_path) {
                 Ok(file_data) => {
@@ -172,20 +204,14 @@ async fn handle_user_input(
 
                     let serialized = serde_json::to_vec(&file_message)?;
 
-                    // Send file message to the specific peer
-                    if let Err(e) = send_file_to_peer(
-                        swarm,
-                        &target_peer_id,
-                        topic,
-                        serialized,
-                    )
-                    .await
-                    {
-                        println!("Failed to send file to peer {}: {:?}", target_peer_id, e);
-                    } else {
-                        println!("File sent to peer: {}", target_peer_id);
-                        // Increment score for the local peer
-                        update_peer_score(peer_scores, local_peer_id, 1.0);
+                    for peer_id in target_peers {
+                        if let Err(e) = send_file_to_peer(swarm, &peer_id, topic, serialized.clone()).await {
+                            println!("Failed to send file to peer {}: {:?}", peer_id, e);
+                        } else {
+                            println!("File sent to peer: {}", peer_id);
+                            // Increment score for the local peer
+                            update_peer_score(peer_scores, peer_id, 1.0);
+                        }
                     }
                 }
                 Err(e) => println!("Failed to read file: {}", e),
@@ -198,6 +224,13 @@ async fn handle_user_input(
         for (peer_id, score) in peer_scores {
             println!("Peer ID: {}, Score: {}", peer_id, score);
         }
+    } else if input.trim() == "@check_logs" {
+        // Example: Search logs for a specific peer or file
+        let logs = file_transfer_logs.lock().unwrap();
+        let results = search_transfer_log(&logs, None, None, None);
+        for log in results {
+            println!("Log: {:?}", log);
+        }
     } else {
         // Handle regular messages
         let message_with_password = format!("{}:{}", password, input);
@@ -209,7 +242,7 @@ async fn handle_user_input(
             println!("Publish error: {:?}", e);
         } else {
             println!("Message sent: {}", input);
-            update_peer_score(peer_scores, local_peer_id, 0.5);
+            update_peer_score(peer_scores, peer_id, 0.5);
         }
     }
     Ok(())
@@ -262,6 +295,9 @@ async fn handle_swarm_event(
     swarm: &mut libp2p::Swarm<MyBehaviour>,
     password: &str,
     peer_scores: &mut HashMap<PeerId, f64>,
+    local_peer_id: &PeerId,
+    topic: &gossipsub::IdentTopic, // Added topic
+    file_transfer_logs: SharedFileTransferLogs,
 ) -> Result<(), Box<dyn Error>> {
     match event {
         SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
@@ -286,14 +322,18 @@ async fn handle_swarm_event(
             message_id: id,
             message,
         })) => {
-            if is_valid_interaction(peer_scores, &peer_id) {
-                println!("Valid interaction with peer: {}", peer_id);
-                handle_received_message(&peer_id, &id, &message, password).await?;
-                update_peer_score(peer_scores, &peer_id, 1.0);
-            } else {
-                println!("Invalid interaction with peer: {}", peer_id);
-                update_peer_score(peer_scores, &peer_id, -0.5); // Penalize invalid interactions
-            }
+            handle_received_message(
+                &peer_id,
+                &id,
+                &message,
+                password,
+                peer_scores,
+                local_peer_id,
+                swarm, // Pass swarm
+                topic, // Pass topic
+                file_transfer_logs,
+            )
+            .await?;
         }
         SwarmEvent::NewListenAddr { address, .. } => {
             println!("Local node is listening on {}", address);
@@ -304,27 +344,79 @@ async fn handle_swarm_event(
 }
 
 
+
 // Helper function to handle received messages
 async fn handle_received_message(
     peer_id: &PeerId,
     message_id: &gossipsub::MessageId,
     message: &gossipsub::Message,
     password: &str,
+    peer_scores: &mut HashMap<PeerId, f64>, // Add peer_scores for score updates
+    local_peer_id: &PeerId,
+    swarm: &mut libp2p::Swarm<MyBehaviour>, // Add swarm for publishing
+    topic: &gossipsub::IdentTopic,          // Add topic for publishing
+    file_transfer_logs: SharedFileTransferLogs,
 ) -> Result<(), Box<dyn Error>> {
     // Attempt to deserialize the message as FileMessage
     if let Ok(file_message) = serde_json::from_slice::<FileMessage>(&message.data) {
         if file_message.password == password {
             // Save the received file
-            let peer_dir = format!("./{}/", peer_id);
-            std::fs::create_dir_all(&peer_dir)?;
-            let file_path = format!("{}/{}", peer_dir, file_message.file_name);
+            let local_peer_id_str = format!("./{}/", local_peer_id);
+            std::fs::create_dir_all(&local_peer_id_str)?;
+            let file_path = format!("{}/{}", local_peer_id_str, file_message.file_name);
             std::fs::write(&file_path, &file_message.data)?;
+
             println!(
                 "Received file '{}' from peer {} and saved to '{}'",
                 file_message.file_name, peer_id, file_path
             );
+
+            // Increment the peer's score
+            update_peer_score(peer_scores, peer_id, 1.0);
+            // Publish the file information
+            
+
+            let log_message = FileTransferLog {
+                peer_id: local_peer_id.to_string(),
+                file_name: file_message.file_name.clone(),
+                timestamp: chrono::Utc::now(),
+                password: password.to_string(),
+            };
+
+            if let Ok(serialized_log) = serde_json::to_vec(&log_message) {
+                if let Err(e) = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic.clone(), serialized_log)
+                {
+                    println!("Failed to publish file log info: {:?}", e);
+                } else {
+                    println!("File log info published to topic.");
+                }
+            }
+
         } else {
             println!("Received file with invalid password from peer: {}", peer_id);
+
+            // Decrease the peer's score for invalid interaction
+            update_peer_score(peer_scores, peer_id, -0.5);
+        }
+    } else if let Ok(log_message) = serde_json::from_slice::<FileTransferLog>(&message.data) {
+        // Update the file transfer logs
+        if log_message.password == password {
+            let mut logs = file_transfer_logs.lock().unwrap();
+            logs.push(FileTransferLog {
+                peer_id: log_message.peer_id.clone(),
+                file_name: log_message.file_name.clone(),
+                timestamp: log_message.timestamp,
+                password:log_message.password,
+            });
+            println!(
+                "Updated logs with new entry: peer_id={}, file_name={}",
+                log_message.peer_id, log_message.file_name
+            );
+        } else {
+            println!("Received file transfer log with invalid password from peer: {}", peer_id);
         }
     } else {
         // Treat as a regular text message
@@ -344,6 +436,7 @@ async fn handle_received_message(
     }
     Ok(())
 }
+
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct FileMessage {
