@@ -127,9 +127,44 @@ pub async fn run_peer_to_peer_system(
             event = swarm.select_next_some() => {
                 handle_swarm_event(event, &mut swarm, &password, &mut peer_scores, &local_peer_id,&topic, Arc::clone(&file_transfer_logs)).await?;
             }
+            _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                // Periodic cleanup and score decay
+                remove_disconnected_peers_and_decay_scores(&swarm, &mut peer_scores);
+            }
         }
     }
 }
+
+/// Removes disconnected peers from the peer_scores and decreases scores for all peers.
+fn remove_disconnected_peers_and_decay_scores(
+    swarm: &libp2p::Swarm<MyBehaviour>,
+    peer_scores: &mut HashMap<PeerId, f64>,
+) {
+    let mut disconnected_peers = Vec::new();
+
+    // Identify disconnected peers
+    for peer_id in peer_scores.keys() {
+        if !swarm.is_connected(peer_id) {
+            disconnected_peers.push(peer_id.clone());
+        }
+    }
+
+    // Remove disconnected peers
+    for peer_id in &disconnected_peers {
+        println!("Removing disconnected peer: {}", peer_id);
+        peer_scores.remove(peer_id);
+    }
+
+    // Decrease scores for all remaining peers
+    for (peer_id, score) in peer_scores.iter_mut() {
+        *score -= 0.1; // Decrease by 0.1 (adjust as needed)
+        if *score < 0.0 {
+            *score = 0.0; // Ensure scores don't drop below zero
+        }
+        println!("Updated score for {}: {}", peer_id, score);
+    }
+}
+
 
 // Helper function to update scores
 fn update_peer_score(peer_scores: &mut HashMap<PeerId, f64>, peer_id: &PeerId, delta: f64) {
@@ -210,7 +245,6 @@ async fn handle_user_input(
                         } else {
                             println!("File sent to peer: {}", peer_id);
                             // Increment score for the local peer
-                            update_peer_score(peer_scores, peer_id, 1.0);
                         }
                     }
                 }
@@ -242,7 +276,6 @@ async fn handle_user_input(
             println!("Publish error: {:?}", e);
         } else {
             println!("Message sent: {}", input);
-            update_peer_score(peer_scores, peer_id, 0.5);
         }
     }
     Ok(())
