@@ -17,7 +17,7 @@ use rand::prelude::IteratorRandom;
 use std::collections::HashMap;
 use std::fs;
 use tokio::{io, io::AsyncBufReadExt, select};
-
+use rand::Rng;
 mod chunker;
 mod file_operations;
 mod storage_manager;
@@ -84,6 +84,7 @@ struct FileMessage {
     password: String,
     file_name: String,
     data: Vec<u8>,
+    receivers: Vec<String>,
 }
 
 pub async fn run_peer_to_peer_system(
@@ -235,13 +236,6 @@ async fn handle_user_input(
 ) -> Result<(), Box<dyn Error>> {
     let trimmed = input.trim();
     if trimmed == "@upload" {
-        let target_peers = select_peers(peer_scores, 3);
-
-        if target_peers.is_empty() {
-            println!("No valid peers to send the file.");
-            return Ok(());
-        }
-
         if let Some(file_path) = file_operations::select_file() {
             let file_name = file_path
                 .file_name()
@@ -267,24 +261,36 @@ async fn handle_user_input(
 
                 let chunk_filename = format!("{}({}-of-{})", file_name, i + 1, total_chunks);
                 storage_manager::save_chunk(&buffer, &metadata, &local_peer_dir, &chunk_filename)?;
+                let target_peers = select_peers(peer_scores, 3);
+
+                if target_peers.is_empty() {
+                    println!("No valid peers to send the file.");
+                    return Ok(());
+                }
+                let receivers: Vec<String> = target_peers.iter().map(|pid| pid.to_string()).collect();
 
                 let file_message = FileMessage {
                     sender: (*local_peer_id).to_string(),
                     password: password.to_string(),
                     file_name: chunk_filename.clone(),
                     data: buffer,
+                    receivers, // Now we include the receivers field
                 };
 
                 let serialized = serde_json::to_vec(&file_message)?;
-                for peer_id in &target_peers {
-                    if let Err(e) =
-                        send_file_to_peer(swarm, peer_id, topic, serialized.clone()).await
-                    {
-                        println!("Failed to send file chunk to peer {}: {:?}", peer_id, e);
-                    } else {
-                        println!("File chunk '{}' sent to peer: {}", chunk_filename, peer_id);
-                    }
+
+                if let Err(e) = send_file_to_peers(swarm, &target_peers, topic, serialized.clone()).await {
+                    println!(
+                        "Failed to send file chunk '{}' to peers {:?}: {:?}",
+                        chunk_filename, target_peers, e
+                    );
+                } else {
+                    println!(
+                        "File chunk '{}' successfully sent to peers: {:?}",
+                        chunk_filename, target_peers
+                    );
                 }
+
             }
         } else {
             println!("No file selected for upload.");
@@ -347,47 +353,87 @@ async fn handle_user_input(
     }
     Ok(())
 }
-
-async fn send_file_to_peer(
+async fn send_file_to_peers(
     swarm: &mut libp2p::Swarm<MyBehaviour>,
-    target_peer_id: &PeerId,
+    target_peers: &[PeerId],
     topic: &gossipsub::IdentTopic,
     serialized_message: Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
-    if !swarm.is_connected(target_peer_id) {
-        println!("Peer {} is not connected.", target_peer_id);
-        return Err("Target peer is not connected".into());
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Add all target peers as explicit peers to ensure they are included in the Gossipsub mesh
+    for peer_id in target_peers {
+        if !swarm.is_connected(peer_id) {
+            println!("Peer {} is not connected. Skipping.", peer_id);
+            continue;
+        }
+        swarm.behaviour_mut().gossipsub.add_explicit_peer(peer_id);
+        println!("Added peer {} as an explicit peer.", peer_id);
     }
 
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .add_explicit_peer(target_peer_id);
-    println!("Added peer {} as an explicit peer.", target_peer_id);
-
+    // Wait briefly to allow the protocol to adjust
     tokio::time::sleep(Duration::from_secs(2)).await;
 
+    // Publish the message to the topic once
     let result = swarm
         .behaviour_mut()
         .gossipsub
         .publish(topic.clone(), serialized_message);
 
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .remove_explicit_peer(target_peer_id);
+    // Remove all explicit peers to restore normal routing
+    for peer_id in target_peers {
+        swarm.behaviour_mut().gossipsub.remove_explicit_peer(peer_id);
+    }
 
     match result {
         Ok(_) => {
-            println!("File successfully sent to peer {}.", target_peer_id);
+            println!("File successfully sent to peers: {:?}", target_peers);
             Ok(())
         }
         Err(e) => {
-            println!("Failed to send file to peer {}: {:?}", target_peer_id, e);
+            println!("Failed to send file to peers {:?}: {:?}", target_peers, e);
             Err(e.into())
         }
     }
 }
+// async fn send_file_to_peer(
+//     swarm: &mut libp2p::Swarm<MyBehaviour>,
+//     target_peer_id: &PeerId,
+//     topic: &gossipsub::IdentTopic,
+//     serialized_message: Vec<u8>,
+// ) -> Result<(), Box<dyn Error>> {
+//     if !swarm.is_connected(target_peer_id) {
+//         println!("Peer {} is not connected.", target_peer_id);
+//         return Err("Target peer is not connected".into());
+//     }
+
+//     swarm
+//         .behaviour_mut()
+//         .gossipsub
+//         .add_explicit_peer(target_peer_id);
+//     println!("Added peer {} as an explicit peer.", target_peer_id);
+
+//     tokio::time::sleep(Duration::from_secs(2)).await;
+
+//     let result = swarm
+//         .behaviour_mut()
+//         .gossipsub
+//         .publish(topic.clone(), serialized_message);
+
+//     swarm
+//         .behaviour_mut()
+//         .gossipsub
+//         .remove_explicit_peer(target_peer_id);
+
+//     match result {
+//         Ok(_) => {
+//             println!("File successfully sent to peer {}.", target_peer_id);
+//             Ok(())
+//         }
+//         Err(e) => {
+//             println!("Failed to send file to peer {}: {:?}", target_peer_id, e);
+//             Err(e.into())
+//         }
+//     }
+// }
 
 async fn handle_swarm_event(
     event: SwarmEvent<MyBehaviourEvent>,
@@ -404,7 +450,8 @@ async fn handle_swarm_event(
             for (peer_id, _) in list {
                 println!("mDNS discovered a new peer: {}", peer_id);
                 swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                peer_scores.entry(peer_id).or_insert(0.5);
+                let initial_score: f64 = rand::thread_rng().gen_range(3.0..=8.0);
+                peer_scores.entry(peer_id).or_insert(initial_score);
             }
         }
         SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
@@ -458,6 +505,15 @@ async fn handle_received_message(
     let data = &message.data;
 
     if let Ok(file_message) = serde_json::from_slice::<FileMessage>(data) {
+        let local_peer_id_str = local_peer_id.to_string();
+        if !file_message.receivers.contains(&local_peer_id_str) {
+            println!(
+                "Received file chunk '{}' from peer {} but local peer is not a listed receiver. Ignoring.",
+                file_message.file_name, peer_id
+            );
+            // Here you can choose to return or just ignore the message.
+            return Ok(());
+        }
         if file_message.password == password {
             let local_peer_id_str = format!("./{}/", local_peer_id);
             std::fs::create_dir_all(&local_peer_id_str)?;
@@ -524,7 +580,7 @@ async fn handle_received_message(
                 }
             }
 
-            update_peer_score(peer_scores, peer_id, 1.0);
+            update_peer_score(peer_scores, peer_id, 0.5);
 
             let log_message = FileTransferLog {
                 peer_id: local_peer_id.to_string(),
@@ -546,7 +602,7 @@ async fn handle_received_message(
             }
         } else {
             println!("Received file with invalid password from peer: {}", peer_id);
-            update_peer_score(peer_scores, peer_id, -0.5);
+            update_peer_score(peer_scores, peer_id, -0.01);
         }
     } else if let Ok(log_message) = serde_json::from_slice::<FileTransferLog>(data) {
         if log_message.password == password {
@@ -594,11 +650,13 @@ async fn handle_received_message(
 
                 for cf in chunk_files {
                     let chunk_data = fs::read(format!("{}{}", local_peer_id_str, cf))?;
+                    let receivers = vec![peer_id.to_string()];
                     let file_message = FileMessage {
                         sender: local_peer_id.to_string(),
                         password: password.to_string(),
                         file_name: cf.clone(),
                         data: chunk_data,
+                        receivers:receivers,
                     };
                     if let Ok(serialized_chunk) = serde_json::to_vec(&file_message) {
                         if let Err(e) = swarm

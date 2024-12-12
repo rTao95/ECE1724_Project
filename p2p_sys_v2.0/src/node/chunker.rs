@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-const CHUNK_SIZE: usize = 16 * 16; // 256
+const CHUNK_SIZE: usize =1024 * 15; // 15kb
 
 /// Represents metadata about a file chunk, including its hash.
 #[derive(Debug)]
