@@ -4,7 +4,7 @@
 
 Yige Tao 1000741094
 
-Zhonghao Liu 1004796848
+Zhonghao Liu 1004796848 zhh.liu@mail.utoronto.ca
 
 Zhouhan Jin 1006146699
 
