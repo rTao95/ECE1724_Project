@@ -60,3 +60,56 @@ This project provides a peer-to-peer (P2P) file-sharing system using libp2p with
 8. **Topic-Based Communication (Gossipsub)**  
    - Uses a gossipsub topic for all interactions, including file requests, metadata, and broadcasts.
    - Leverages the gossip mesh to ensure decentralized, robust message dissemination and improved network fault tolerance.
+  
+## User (and Developer) Guide
+
+### Running a Peer
+
+1. **Starting a Peer**  
+   - Ensure that you have built the project following the steps in the Reproducibility Guide.
+   - Run the peer with:
+     ```bash
+     cargo run --release -- <topic_name> <password>
+     ```
+     Example:
+     ```bash
+     cargo run --release -- "mytopic" "secretpassword"
+     ```
+   - This command launches a peer that subscribes to the specified topic (`mytopic`) and uses `secretpassword` for authentication.
+
+2. **Basic Interactions (Commands)**  
+   - `@upload`:  
+     Prompts you to select a file for upload. Once selected, the file is split into chunks and distributed to multiple peers for redundancy.
+   
+   - `@download <filename>`:  
+     Requests the specified file from the network. If found, you receive metadata and file chunks, which the peer automatically reassembles.
+   
+   - `@check_scores`:  
+     Prints the current known peer scores, helping you understand the trustworthiness of your peers.
+   
+   - `@check_logs`:  
+     Prints the file transfer logs, allowing you to review past transfers.
+   
+   - Any other text input (e.g., `Hello network!`):  
+     Sends a public message to all peers in the topic, facilitating open communication and announcements.
+
+3. **Behavior and Storage**  
+   - Files and their chunks are stored in a directory named after the local peer’s ID.
+   - Scores are dynamically updated; well-behaved peers become more trusted.
+   - All file transfers are logged, providing an audit trail of network activities.
+
+4. **For Developers**  
+   - To modify chunk sizes, peer scoring logic, or other behaviors, review and update the relevant modules (e.g., `chunker`, `storage_manager`, or event-handling code).
+   - The code is structured to allow extension of functionalities, integration with additional encryption, or alternative discovery mechanisms.
+
+---
+
+## Reproducibility Guide
+
+### Prerequisites
+- **Rust & Cargo Installed**:  
+  On Linux or macOS:
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  source $HOME/.cargo/env
+  ```
