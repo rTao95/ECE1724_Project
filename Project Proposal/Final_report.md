@@ -113,3 +113,69 @@ This project provides a peer-to-peer (P2P) file-sharing system using libp2p with
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   source $HOME/.cargo/env
   ```
+---
+
+## Steps to Build and Run
+
+### 1. Clone the Repository
+Clone the project repository using the following commands:
+```bash
+git clone <URL_OF_YOUR_PROJECT_REPOSITORY>
+cd <PROJECT_DIRECTORY>
+```
+
+### 2. Build the Project
+To build the project, run:
+```bash
+cargo build --release
+```
+This command generates an optimized binary in the `target/release/` directory.
+
+### 3. Run a Peer
+Start a peer by running:
+```bash
+cargo run --release -- <topic_name> <password>
+```
+Example:
+```bash
+cargo run --release -- "mytopic" "secretpassword"
+```
+
+- Replace `<topic_name>` with the desired gossipsub topic name.
+- Replace `<password>` with the shared password for secure communication.
+
+When the command runs:
+- The peer prints its local Peer ID.
+- It starts listening for connections over TCP and QUIC.
+
+### 4. Connect Multiple Peers
+To create a network:
+- Repeat the above command in multiple terminals or machines.
+- Ensure all peers use the same topic name and password.
+- Peers on the same local network automatically discover each other via mDNS.
+
+### 5. Testing the Features
+After setting up the peers, test the following features:
+
+#### File Upload
+1. Use the `@upload` command in a peer's terminal.
+2. Select a file to upload.
+3. The file is chunked and sent to multiple peers for redundancy.
+
+#### File Download
+1. Use the `@download <filename>` command.
+2. If the file exists in the network, it will be downloaded chunk-by-chunk and reassembled.
+
+#### Public Messaging
+1. Send a public message by typing any text (e.g., `Hello network!`).
+2. The message will be broadcast to all peers subscribed to the topic.
+
+#### Check Peer Scores
+1. Use the `@check_scores` command to display the current peer scores.
+
+#### View File Logs
+1. Use the `@check_logs` command to view the history of file transfers.
+
+---
+
+No additional setup or configurations are required. Following these steps ensures that any user or instructor can build, run, and test the project seamlessly.
