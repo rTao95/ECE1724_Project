@@ -179,3 +179,12 @@ After setting up the peers, test the following features:
 ---
 
 No additional setup or configurations are required. Following these steps ensures that any user or instructor can build, run, and test the project seamlessly.
+
+## Lessons Learned and Concluding Remarks
+Throughout the development of this project, our team gained a deeper understanding of building a peer-to-peer (P2P) file distribution system. Initially, we experimented with direct broadcasting of files using a pub/sub mechanism and discovered the challenges of ensuring reliable, timely, and complete file transfers in a decentralized network. We learned that effectively handling chunked data distribution requires careful coordination: proper file chunk naming, robust metadata exchange for total chunks and file structure, and a strict approach to verifying the completeness of received data before reassembling files.
+
+Our team also recognized the importance of error handling, especially in asynchronous and distributed environments. Relying solely on broadcast messaging often meant dealing with duplicate chunks, missing chunks, or metadata arriving out of order. These scenarios taught us the value of maintaining a clear download state and only committing to final file assembly when all required data is confirmed. Moreover, we found it essential to handle partial or incomplete downloads gracefully and to avoid leaving users with empty or corrupt files.
+
+From a development standpoint, working with libp2p, Diesel or SQLx, and integrating various components into a unified system reinforced the value of modular code design, consistent naming conventions, and thorough testing. The complexity of asynchronous code and event-driven architectures taught us the importance of clear documentation, logging, and careful concurrency management to avoid race conditions and ensure predictable behavior.  
+
+In conclusion, the project successfully achieved its objectives by creating a decentralized, secure, and efficient P2P file sharing system in Rust. The system fills a niche in the Rust ecosystem by providing a foundation that can be extended for more complex P2P applications. By using libp2p and gossipsub, the system enables users to upload, request, and distribute files chunk-by-chunk over a robust network, with features like node discovery, data redundancy, and user authentication. The lessons learned throughout the development process will inform our future work in the Rust ecosystem and beyond.
