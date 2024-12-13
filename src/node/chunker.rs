@@ -1,14 +1,11 @@
-use crate::node::utils;
 use std::fs::File;
 use std::io::{self, Read};
-use std::path::Path;
 
 const CHUNK_SIZE: usize =1024 * 15; // 15kb
 
 /// Represents metadata about a file chunk, including its hash.
 #[derive(Debug)]
 pub struct ChunkMetadata {
-    pub hash: String,
     pub size: usize,
 }
 
@@ -23,10 +20,7 @@ pub fn chunk_file(file_path: &str) -> io::Result<Vec<ChunkMetadata>> {
             break;
         }
 
-        let chunk = &buffer[..bytes_read];
-        let hash = utils::hash_data(chunk);
         let metadata = ChunkMetadata {
-            hash,
             size: bytes_read,
         };
 
