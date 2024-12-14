@@ -69,11 +69,11 @@ This project provides a peer-to-peer (P2P) file-sharing system using libp2p with
    - Ensure that you have built the project following the steps in the Reproducibility Guide.
    - Run the peer with:
      ```bash
-     cargo run --release -- <topic_name> <password>
+     cargo run --release -- --topic <topic_name> --password <password>
      ```
      Example:
      ```bash
-     cargo run --release -- "mytopic" "secretpassword"
+     cargo run --release -- --topic mytopic --password secretpassword
      ```
    - This command launches a peer that subscribes to the specified topic (`mytopic`) and uses `secretpassword` for authentication.
 
@@ -91,7 +91,7 @@ This project provides a peer-to-peer (P2P) file-sharing system using libp2p with
      Prints the file transfer logs, allowing you to review past transfers.
    
    - Any other text input (e.g., `Hello network!`):  
-     Sends a public message to all peers in the topic, facilitating open communication and announcements.
+     Sends a public message to **all peers** in the topic, facilitating open communication and announcements.
 
 3. **Behavior and Storage**  
    - Files and their chunks are stored in a directory named after the local peer’s ID.
@@ -134,11 +134,11 @@ This command generates an optimized binary in the `target/release/` directory.
 ### 3. Run a Peer
 Start a peer by running:
 ```bash
-cargo run --release -- <topic_name> <password>
+cargo run --release -- --topic <topic_name> --password <password>
 ```
 Example:
 ```bash
-cargo run --release -- "mytopic" "secretpassword"
+cargo run --release -- --topic mytopic --password secretpassword
 ```
 
 - Replace `<topic_name>` with the desired gossipsub topic name.
