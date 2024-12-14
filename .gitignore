@@ -1,0 +1,39 @@
+# Ignore build output directory
+/target/
+
+# Ignore Cargo.lock if you're building a library
+Cargo.lock
+
+# Ignore generated files
+chunks/
+*.log
+
+# Ignore editor and IDE files
+/.vscode/
+/.idea/
+/*.swp
+*.swo
+*~
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore temporary files
+/tmp/
+/temp/
+/*.tmp
+*.bak
+
+# Ignore compiled binaries (optional)
+/**/*.exe
+/**/*.dll
+/**/*.so
+/**/*.dylib
+
+# Ignore coverage reports
+/coverage/
+
+# Ignore environment variable files
+.env
+.env.local

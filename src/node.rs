@@ -8,7 +8,6 @@ use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::io::Write;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,7 +20,6 @@ use rand::Rng;
 mod chunker;
 mod file_operations;
 mod storage_manager;
-mod utils;
 
 type SharedFileTransferLogs = Arc<Mutex<Vec<FileTransferLog>>>;
 

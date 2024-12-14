@@ -15,9 +15,3 @@ pub fn save_chunk(
     file.write_all(chunk_data)?;
     Ok(())
 }
-
-/// Load a chunk by name from the specified directory.
-pub fn load_chunk(chunk_name: &str, output_dir: &str) -> io::Result<Vec<u8>> {
-    let chunk_path = Path::new(output_dir).join(chunk_name);
-    std::fs::read(chunk_path)
-}
