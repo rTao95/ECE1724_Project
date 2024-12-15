@@ -184,6 +184,16 @@ After setting up the peers, test the following features:
 
 No additional setup or configurations are required. Following these steps ensures that any user or instructor can build, run, and test the project seamlessly.
 
+## Contributions
+Our team worked diligently and collaboratively, with each member contributing significantly to the success of the project. Below is a breakdown of the specific contributions:
+1. Node Discovery and P2P Networking: Yige Tao, Zhonghao Liu
+2. File Chunking and Distribution: Zhonghao Liu, Zhouhan Jin
+3. Data Redundancy and Reliability: Yige Tao, Zhonghao Liu
+4. User Authentication and Access Control: Yige Tao, Zhouhan Jin
+5. Master Node for Initial Coordination: Yige Tao, Zhouhan Jin
+6. Front-End Interface (CLI): Zhonghao Liu, Zhouhan Jin
+7. Test and write final report: Yige Tao, Zhonghao Liu, Zhouhan Jin
+
 ## Lessons Learned and Concluding Remarks
 Throughout the development of this project, our team gained a deeper understanding of building a peer-to-peer (P2P) file distribution system. Initially, we experimented with direct broadcasting of files using a pub/sub mechanism and discovered the challenges of ensuring reliable, timely, and complete file transfers in a decentralized network. We learned that effectively handling chunked data distribution requires careful coordination: proper file chunk naming, robust metadata exchange for total chunks and file structure, and a strict approach to verifying the completeness of received data before reassembling files.
 
