@@ -60,6 +60,10 @@ This project provides a peer-to-peer (P2P) file-sharing system using libp2p with
 8. **Topic-Based Communication (Gossipsub)**  
    - Uses a gossipsub topic for all interactions, including file requests, metadata, and broadcasts.
    - Leverages the gossip mesh to ensure decentralized, robust message dissemination and improved network fault tolerance.
+
+## Demo Video
+
+https://drive.google.com/file/d/1-rJA1W_pPp8SuCvOCGJEp53cy9ptvYI1/view?usp=drive_link
   
 ## User (and Developer) Guide
 
